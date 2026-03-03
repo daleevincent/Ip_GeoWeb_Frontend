@@ -23,7 +23,7 @@ function Login() {
     }
     setLoading(true);
     try {
-      const response = await axios.post("https://ip-geo-web-frontend.vercel.app/api/login", { email, password });
+      const response = await axios.post("https://ip-geo-web-backend.vercel.app/api/login", { email, password });
       localStorage.setItem("token", response.data.token);
       navigate("/");
     } catch (err) {
