@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import "../styles/global.css";
 
+const BASE_URL = import.meta.env.PROD
+  ? "https://ip-geo-web-backend.vercel.app"
+  : "http://localhost:8000";
+
 function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -17,17 +21,26 @@ function Login() {
 
   const handleLogin = async () => {
     setError("");
+
     if (!email || !password) {
       setError("Please enter both email and password.");
       return;
     }
+
     setLoading(true);
+
     try {
-      const response = await axios.post("https://ip-geo-web-backend.vercel.app/api/login", { email, password });
+      const response = await axios.post(
+        `${BASE_URL}/api/login`,
+        { email, password }
+      );
+
       localStorage.setItem("token", response.data.token);
       navigate("/");
     } catch (err) {
-      setError(err.response?.data?.message || "Login failed. Please try again.");
+      setError(
+        err.response?.data?.message || "Login failed. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -40,14 +53,12 @@ function Login() {
   return (
     <div className="login-wrapper">
       <div className="login-box">
-        {/* Logo */}
         <div className="login-logo">
           <div className="logo-icon">🌐</div>
           <h2>GeoTracer</h2>
           <p>Sign in to explore IP geolocation</p>
         </div>
 
-        {/* Card */}
         <div className="login-card">
           {error && (
             <div className="error" style={{ marginBottom: "16px" }}>
@@ -83,7 +94,10 @@ function Login() {
             className="btn-primary-full"
             onClick={handleLogin}
             disabled={loading}
-            style={{ opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}
+            style={{
+              opacity: loading ? 0.7 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+            }}
           >
             {loading ? "Signing in…" : "Sign in"}
           </button>

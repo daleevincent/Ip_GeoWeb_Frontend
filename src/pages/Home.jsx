@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "../styles/global.css";
 
+// Map updater for changing view when new coordinates are loaded
 function MapUpdater({ loc }) {
   const map = useMap();
   if (loc) map.setView(loc.split(",").map(Number), 10);
@@ -19,10 +20,13 @@ function Home() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+  // Token from localStorage
   const token = localStorage.getItem("token");
   const authHeaders = useMemo(
     () => ({ headers: { Authorization: `Bearer ${token}` } }),
-    [token],
+    [token]
   );
 
   const handleLogout = () => {
@@ -30,38 +34,51 @@ function Home() {
     navigate("/login");
   };
 
+  // ── Load current IP and history on mount ──
   useEffect(() => {
-    let isMounted = true;
-    const loadData = async () => {
-      try {
-        const [geoRes, histRes] = await Promise.all([
-          axios.get("https://ipinfo.io/geo"),
-          axios.get("https://ip-geo-web-frontend.vercel.app/api/history", authHeaders),
-        ]);
-        if (isMounted) {
-          setGeoData(geoRes.data);
-          setHistory(
-            histRes.data.map((item) => ({ ...item, selected: false })),
-          );
-        }
-      } catch {
-        if (isMounted) setError("Failed to fetch IP information or history.");
-      }
-    };
-    loadData();
-    return () => {
-      isMounted = false;
-    };
-  }, [authHeaders]);
+  let isMounted = true;
 
-  const refreshHistory = async () => {
-    const histRes = await axios.get(
-      "https://ip-geo-web-frontend.vercel.app/api/history",
-      authHeaders,
-    );
-    setHistory(histRes.data.map((item) => ({ ...item, selected: false })));
+  const loadData = async () => {
+    try {
+      // Load current IP info
+      const geoRes = await axios.get("https://ipinfo.io/geo");
+      if (isMounted) setGeoData(geoRes.data);
+
+      // Load history only if token exists
+      if (token) {
+        try {
+          const histRes = await axios.get(`${BASE_URL}/api/history`, authHeaders);
+          if (isMounted) {
+            setHistory(histRes.data.map((item) => ({ ...item, selected: false })));
+          }
+        } catch {
+          // <-- silently ignore history fetch errors
+          // console.error("Failed to fetch history:", err.response?.data || err);
+          // Do NOT setError here to avoid showing "Failed to fetch search history."
+        }
+      }
+
+    } catch {
+      if (isMounted) setError("Failed to fetch IP information."); // only for IP info
+    }
   };
 
+  loadData();
+  return () => { isMounted = false; };
+}, [authHeaders, BASE_URL, token]);
+
+  // ── Refresh history ──
+  const refreshHistory = async () => {
+    if (!token) return;
+    try {
+      const histRes = await axios.get(`${BASE_URL}/api/history`, authHeaders);
+      setHistory(histRes.data.map((item) => ({ ...item, selected: false })));
+    } catch {
+      setError("Failed to refresh history.");
+    }
+  };
+
+  // ── Fetch IP info and optionally save to history ──
   const fetchGeoByIp = async (ip = searchIp, save = true) => {
     setError("");
     const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
@@ -69,26 +86,36 @@ function Home() {
       setError("Please enter a valid IPv4 address.");
       return;
     }
+
     setLoading(true);
+
+    // Fetch IP info
     try {
       const response = await axios.get(`https://ipinfo.io/${ip}/geo`);
       setGeoData(response.data);
-
-      if (save) {
-        await axios.post(
-          "https://ip-geo-web-frontend.vercel.app/api/history",
-          { ip },
-          authHeaders,
-        );
-        await refreshHistory();
-      }
     } catch {
       setError("IP address not found or network error.");
-    } finally {
       setLoading(false);
+      return;
     }
+
+    // Save to history only if logged in
+    if (save && token) {
+      try {
+        await axios.post(`${BASE_URL}/api/history`, { ip }, authHeaders);
+        await refreshHistory();
+      } catch (error) {
+        console.error("Failed to save history:", error.response?.data || error);
+        setError("Failed to save search history.");
+      }
+    } else if (save && !token) {
+      setError("You are not logged in. Cannot save search history.");
+    }
+
+    setLoading(false);
   };
 
+  // ── Clear search input ──
   const clearSearch = async () => {
     setSearchIp("");
     setError("");
@@ -100,31 +127,25 @@ function Home() {
     }
   };
 
+  // ── Toggle select in history ──
   const toggleSelect = (index) => {
     setHistory((prev) =>
-      prev.map((item, i) =>
-        i === index ? { ...item, selected: !item.selected } : item,
-      ),
+      prev.map((item, i) => (i === index ? { ...item, selected: !item.selected } : item))
     );
   };
 
+  // ── Select / deselect all ──
   const selectAll = () => {
     const allSelected = history.every((i) => i.selected);
-    setHistory((prev) =>
-      prev.map((item) => ({ ...item, selected: !allSelected })),
-    );
+    setHistory((prev) => prev.map((item) => ({ ...item, selected: !allSelected })));
   };
 
+  // ── Delete selected history items ──
   const deleteSelected = async () => {
     const toDelete = history.filter((item) => item.selected);
     try {
       await Promise.all(
-        toDelete.map((item) =>
-          axios.delete(
-            `https://ip-geo-web-frontend.vercel.app/api/history/${item.id}`,
-            authHeaders,
-          ),
-        ),
+        toDelete.map((item) => axios.delete(`${BASE_URL}/api/history/${item.id}`, authHeaders))
       );
       await refreshHistory();
     } catch {
@@ -261,7 +282,7 @@ function Home() {
                   className="ip-text"
                   onClick={(e) => {
                     e.stopPropagation();
-                    fetchGeoByIp(item.ip, false); // ← already in history, don't re-save
+                    fetchGeoByIp(item.ip, false); // do not re-save
                   }}
                 >
                   {item.ip}
