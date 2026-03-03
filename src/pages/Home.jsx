@@ -36,7 +36,7 @@ function Home() {
       try {
         const [geoRes, histRes] = await Promise.all([
           axios.get("https://ipinfo.io/geo"),
-          axios.get("http://localhost:8000/api/history", authHeaders),
+          axios.get("https://ip-geo-web-frontend.vercel.app/api/history", authHeaders),
         ]);
         if (isMounted) {
           setGeoData(geoRes.data);
@@ -56,7 +56,7 @@ function Home() {
 
   const refreshHistory = async () => {
     const histRes = await axios.get(
-      "http://localhost:8000/api/history",
+      "https://ip-geo-web-frontend.vercel.app/api/history",
       authHeaders,
     );
     setHistory(histRes.data.map((item) => ({ ...item, selected: false })));
@@ -76,7 +76,7 @@ function Home() {
 
       if (save) {
         await axios.post(
-          "http://localhost:8000/api/history",
+          "https://ip-geo-web-frontend.vercel.app/api/history",
           { ip },
           authHeaders,
         );
@@ -121,7 +121,7 @@ function Home() {
       await Promise.all(
         toDelete.map((item) =>
           axios.delete(
-            `http://localhost:8000/api/history/${item.id}`,
+            `https://ip-geo-web-frontend.vercel.app/api/history/${item.id}`,
             authHeaders,
           ),
         ),
