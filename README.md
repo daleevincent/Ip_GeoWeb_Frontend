@@ -71,3 +71,5 @@ Endpoint	         Method	   Description
 1. Start the backend first (npm run dev in ip-geo-api).
 2. Start the frontend next (npm start in ip-geo-web).
 3. Login with the seeded user and test all features.
+
+*Note: SQLite was used locally. For production deployment on Vercel Serverless, I switched to in-memory demo auth to comply with serverless constraints. Vercel only executes serverless functions under /api. Express apps must be exported and wrapped properly; traditional app.listen() won’t work in production.*
