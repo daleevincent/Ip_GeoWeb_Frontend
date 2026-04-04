@@ -5,6 +5,8 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import "../styles/global.css";
 
+const API = "http://localhost:8000/api";
+
 function MapUpdater({ loc }) {
   const map = useMap();
   if (loc) map.setView(loc.split(",").map(Number), 10);
@@ -20,9 +22,12 @@ function Home() {
   const [loading, setLoading] = useState(false);
 
   const token = localStorage.getItem("token");
+
   const authHeaders = useMemo(
-    () => ({ headers: { Authorization: `Bearer ${token}` } }),
-    [token],
+    () => ({
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+    [token]
   );
 
   const handleLogout = () => {
@@ -30,56 +35,73 @@ function Home() {
     navigate("/login");
   };
 
+  // ✅ FIXED: Decoupled the requests so one failure doesn't break the whole component
   useEffect(() => {
     let isMounted = true;
+
     const loadData = async () => {
+      // 1. Fetch current IP Geodata
       try {
-        const [geoRes, histRes] = await Promise.all([
-          axios.get("https://ipinfo.io/geo"),
-          axios.get("http://localhost:8000/api/history", authHeaders),
-        ]);
-        if (isMounted) {
-          setGeoData(geoRes.data);
-          setHistory(
-            histRes.data.map((item) => ({ ...item, selected: false })),
-          );
+        const geoRes = await axios.get(API);
+        if (isMounted) setGeoData(geoRes.data);
+      } catch (err) {
+        console.error("Geo error:", err);
+        if (isMounted) setError("Failed to fetch current IP information.");
+      }
+
+      // 2. Fetch History if token exists
+      if (token) {
+        try {
+          const histRes = await axios.get(`${API}/history`, authHeaders);
+          if (isMounted) {
+            setHistory(
+              histRes.data.map((item) => ({ ...item, selected: false }))
+            );
+          }
+        } catch (err) {
+          console.error("History error:", err);
+          if (isMounted) setError("Failed to fetch search history.");
         }
-      } catch {
-        if (isMounted) setError("Failed to fetch IP information or history.");
       }
     };
+
     loadData();
+
     return () => {
       isMounted = false;
     };
-  }, [authHeaders]);
+  }, [authHeaders, token]); // Added token as a dependency
 
   const refreshHistory = async () => {
-    const histRes = await axios.get(
-      "http://localhost:8000/api/history",
-      authHeaders,
-    );
-    setHistory(histRes.data.map((item) => ({ ...item, selected: false })));
+    try {
+      const histRes = await axios.get(`${API}/history`, authHeaders);
+      setHistory(
+        histRes.data.map((item) => ({ ...item, selected: false }))
+      );
+    } catch (err) {
+      console.error("Failed to refresh history", err);
+    }
   };
 
   const fetchGeoByIp = async (ip = searchIp, save = true) => {
     setError("");
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+
+    const ipRegex =
+      /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
     if (!ipRegex.test(ip)) {
       setError("Please enter a valid IPv4 address.");
       return;
     }
+
     setLoading(true);
+
     try {
-      const response = await axios.get(`https://ipinfo.io/${ip}/geo`);
+      // ✅ FIXED: Using the newly specified non-colliding route
+      const response = await axios.get(`${API}/lookup/${ip}`);
       setGeoData(response.data);
 
       if (save) {
-        await axios.post(
-          "http://localhost:8000/api/history",
-          { ip },
-          authHeaders,
-        );
+        await axios.post(`${API}/history`, { ip }, authHeaders);
         await refreshHistory();
       }
     } catch {
@@ -92,8 +114,9 @@ function Home() {
   const clearSearch = async () => {
     setSearchIp("");
     setError("");
+
     try {
-      const response = await axios.get("https://ipinfo.io/geo");
+      const response = await axios.get(API);
       setGeoData(response.data);
     } catch {
       setError("Failed to fetch current IP.");
@@ -103,28 +126,26 @@ function Home() {
   const toggleSelect = (index) => {
     setHistory((prev) =>
       prev.map((item, i) =>
-        i === index ? { ...item, selected: !item.selected } : item,
-      ),
+        i === index ? { ...item, selected: !item.selected } : item
+      )
     );
   };
 
   const selectAll = () => {
     const allSelected = history.every((i) => i.selected);
     setHistory((prev) =>
-      prev.map((item) => ({ ...item, selected: !allSelected })),
+      prev.map((item) => ({ ...item, selected: !allSelected }))
     );
   };
 
   const deleteSelected = async () => {
     const toDelete = history.filter((item) => item.selected);
+
     try {
       await Promise.all(
         toDelete.map((item) =>
-          axios.delete(
-            `http://localhost:8000/api/history/${item.id}`,
-            authHeaders,
-          ),
-        ),
+          axios.delete(`${API}/history/${item.id}`, authHeaders)
+        )
       );
       await refreshHistory();
     } catch {
@@ -140,7 +161,7 @@ function Home() {
 
   return (
     <div className="container">
-      {/* ─── Header ─── */}
+      {/* Header */}
       <div className="header">
         <div className="header-brand">
           <div className="brand-icon">🌐</div>
@@ -151,7 +172,7 @@ function Home() {
         </button>
       </div>
 
-      {/* ─── Search ─── */}
+      {/* Search */}
       <div className="searchBox">
         <input
           type="text"
@@ -168,73 +189,75 @@ function Home() {
         </button>
       </div>
 
-      {/* ─── Error ─── */}
+      {/* Error */}
       {error && <div className="error">⚠️ {error}</div>}
 
-      {/* ─── Geo Info ─── */}
-      {geoData && (
-        <div className="card">
-          <p className="section-title">Location Details</p>
-          <div className="geo-grid">
-            {[
-              { label: "IP", value: geoData.ip },
-              { label: "City", value: geoData.city || "—" },
-              { label: "Region", value: geoData.region || "—" },
-              { label: "Country", value: geoData.country || "—" },
-              { label: "Coordinates", value: geoData.loc || "—" },
-              { label: "Org", value: geoData.org || "—" },
-            ].map(({ label, value }) => (
-              <div className="geo-item" key={label}>
-                <div className="geo-label">{label}</div>
-                <p className="geo-value">{value}</p>
+      {/* Main Content: Left Column (Geo + Map) and Right Column (History) */}
+      <div className="main-content">
+        {/* Left Column */}
+        <div className="left-column">
+          {/* Geo Info */}
+          {geoData && (
+            <div className="card">
+              <p className="section-title">Location Details</p>
+              <div className="geo-grid">
+                {[
+                  { label: "IP", value: geoData.ip },
+                  { label: "City", value: geoData.city || "—" },
+                  { label: "Region", value: geoData.region || "—" },
+                  { label: "Country", value: geoData.country || "—" },
+                  { label: "Coordinates", value: geoData.loc || "—" },
+                  { label: "Org", value: geoData.org || "—" },
+                ].map(({ label, value }) => (
+                  <div className="geo-item" key={label}>
+                    <div className="geo-label">{label}</div>
+                    <p className="geo-value">{value}</p>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* ─── Map ─── */}
-      {geoData?.loc && (
-        <div className="card" style={{ padding: "0", overflow: "hidden" }}>
-          <MapContainer
-            center={geoData.loc.split(",").map(Number)}
-            zoom={10}
-            style={{ height: "340px", width: "100%" }}
-          >
-            <TileLayer
-              attribution="&copy; OpenStreetMap contributors"
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <Marker position={geoData.loc.split(",").map(Number)}>
-              <Popup>
-                {geoData.city}, {geoData.country}
-              </Popup>
-            </Marker>
-            <MapUpdater loc={geoData.loc} />
-          </MapContainer>
+          {/* Map */}
+          {geoData?.loc && (
+            <div className="card" style={{ padding: "0", overflow: "hidden" }}>
+              <MapContainer
+                center={geoData.loc.split(",").map(Number)}
+                zoom={10}
+                style={{ height: "340px", width: "100%" }}
+              >
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors"
+                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                />
+                <Marker position={geoData.loc.split(",").map(Number)}>
+                  <Popup>
+                    {geoData.city}, {geoData.country}
+                  </Popup>
+                </Marker>
+                <MapUpdater loc={geoData.loc} />
+              </MapContainer>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* ─── History ─── */}
-      <div className="history card">
+        {/* Right Column: History */}
+        <div className="right-column">
+          <div className="history card">
         <div
           style={{
             display: "flex",
-            alignItems: "center",
             justifyContent: "space-between",
             marginBottom: "14px",
           }}
         >
-          <p className="section-title" style={{ margin: 0 }}>
-            Search History
-          </p>
+          <p className="section-title">Search History</p>
+
           {history.length > 0 && (
-            <button
-              className="btn-ghost"
-              onClick={selectAll}
-              style={{ padding: "4px 12px", fontSize: "0.75rem" }}
-            >
-              {history.every((i) => i.selected) ? "Deselect all" : "Select all"}
+            <button className="btn-ghost" onClick={selectAll}>
+              {history.every((i) => i.selected)
+                ? "Deselect all"
+                : "Select all"}
             </button>
           )}
         </div>
@@ -257,18 +280,20 @@ function Home() {
                   onChange={() => toggleSelect(index)}
                   onClick={(e) => e.stopPropagation()}
                 />
+
                 <span
                   className="ip-text"
                   onClick={(e) => {
                     e.stopPropagation();
-                    fetchGeoByIp(item.ip, false); // ← already in history, don't re-save
+                    fetchGeoByIp(item.ip, false);
                   }}
                 >
                   {item.ip}
                 </span>
-                {item.created_at && (
+
+                {item.timestamp && (
                   <span className="ip-time">
-                    {new Date(item.created_at).toLocaleDateString()}
+                    {new Date(item.timestamp).toLocaleDateString()}
                   </span>
                 )}
               </li>
@@ -276,13 +301,15 @@ function Home() {
           </ul>
         )}
 
-        {selectedCount > 0 && (
-          <div className="history-footer">
-            <button className="btn-danger" onClick={deleteSelected}>
-              Delete {selectedCount} selected
-            </button>
+          {selectedCount > 0 && (
+            <div className="history-footer">
+              <button className="btn-danger" onClick={deleteSelected}>
+                Delete {selectedCount} selected
+              </button>
+            </div>
+          )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
